@@ -43,6 +43,21 @@ _TRANSLATION_KEYWORDS = {
 }
 
 
+def _stem(token: str) -> str:
+    for suffix in ("ing", "ies", "es", "ed", "s", "al", "ly"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            return token[: -len(suffix)]
+    return token
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        _stem(token)
+        for token in _TOKEN_PATTERN.findall(text)
+        if token not in _STOP_WORDS
+    }
+
+
 def _load_documents() -> list[dict[str, str]]:
     with _CORPUS_PATH.open(encoding="utf-8") as corpus_file:
         documents = json.load(corpus_file)
@@ -58,11 +73,7 @@ def retrieve(question: str, limit: int = 3) -> list[dict[str, str]]:
         if word in expanded_question:
             expanded_question += f" {translation}"
 
-    query_terms = {
-        token
-        for token in _TOKEN_PATTERN.findall(expanded_question)
-        if token not in _STOP_WORDS
-    }
+    query_terms = _tokens(expanded_question)
 
     if not query_terms:
         return []
@@ -76,11 +87,7 @@ def retrieve(question: str, limit: int = 3) -> list[dict[str, str]]:
             f"{document['content']}"
         ).lower()
 
-        document_terms = {
-            token
-            for token in _TOKEN_PATTERN.findall(document_text)
-            if token not in _STOP_WORDS
-        }
+        document_terms = _tokens(document_text)
 
         score = len(query_terms & document_terms)
 
