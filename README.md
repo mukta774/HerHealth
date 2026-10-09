@@ -69,6 +69,12 @@ Cycle history, wellness history, mood, sleep, and other local tracking data are 
 
 API keys are stored only on the backend and are never exposed in the frontend.
 
+### Doctor registration lookup
+
+The Doctors page can search a configured Apify actor through the backend. Configure `APIFY_API_TOKEN`, `APIFY_ACTOR_ID`, and the actor-specific `APIFY_INPUT_*_FIELD` and `APIFY_OUTPUT_*_FIELD` mappings in `backend/.env`. See `backend/.env.example` for the full list. A search input mapping is required for each supplied search value; map at least the actor's name or registration-number output to display usable results.
+
+No actor is preconfigured: an advertised NMC/IMR actor was found, but its live input/output schema, current register coverage, and official-source behavior could not be verified. Confirm the chosen actor's documentation and sample dataset first, then set field mappings to its exact schema. The integration does not treat scraped results as official verification; missing results do not establish that a doctor is unregistered. Actor executions use the Apify API asynchronously and read paginated dataset results.
+
 ## 🚀 Getting Started
 
 ### Frontend
@@ -162,4 +168,3 @@ HerHealth provides general health information for educational purposes only. It 
 ### 🌸 HerHealth
 
 **Your health. Your privacy. Your choice.**
-
