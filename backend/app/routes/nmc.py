@@ -20,15 +20,25 @@ async def lookup_registration(
 ) -> NmcLookupResponse | JSONResponse:
     try:
         results = await lookup_doctors(request)
-    except NmcConfigurationError as error:
+    except NmcConfigurationError:
         return JSONResponse(
             status_code=503,
-            content={"error": {"code": "lookup_not_configured", "message": str(error)}},
+            content={
+                "error": {
+                    "code": "lookup_not_configured",
+                    "message": "Doctor registration lookup is not configured.",
+                }
+            },
         )
-    except NmcApifyTimeoutError as error:
+    except NmcApifyTimeoutError:
         return JSONResponse(
             status_code=504,
-            content={"error": {"code": "lookup_timeout", "message": str(error)}},
+            content={
+                "error": {
+                    "code": "lookup_timeout",
+                    "message": "Registration lookup timed out. Please try again.",
+                }
+            },
         )
     except NmcLookupError:
         return JSONResponse(
