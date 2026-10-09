@@ -72,7 +72,7 @@ def _config(max_results: int = 100) -> ApifyConfig:
     )
 
 
-def test_successful_run_polls_and_reads_paginated_dataset() -> None:
+def test_successful_run_polls_and_reads_paginated_dataset(monkeypatch) -> None:
     dataset_pages = {
         "0": [
             {
@@ -91,6 +91,12 @@ def test_successful_run_polls_and_reads_paginated_dataset() -> None:
         ],
     }
     calls: list[httpx.Request] = []
+    statuses = iter(["RUNNING", "SUCCEEDED"])
+
+    async def skip_poll_delay(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(nmc_lookup.asyncio, "sleep", skip_poll_delay)
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
@@ -100,7 +106,17 @@ def test_successful_run_polls_and_reads_paginated_dataset() -> None:
                 json={
                     "data": {
                         "id": "run-id",
-                        "status": "SUCCEEDED",
+                        "status": "RUNNING",
+                    }
+                },
+            )
+        if request.url.path.endswith("/actor-runs/run-id"):
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "id": "run-id",
+                        "status": next(statuses),
                         "defaultDatasetId": "dataset-id",
                     }
                 },
@@ -119,7 +135,7 @@ def test_successful_run_polls_and_reads_paginated_dataset() -> None:
     assert len(results) == 101
     assert results[0].registration_number == "100"
     assert results[0].verification_status == "unverified"
-    assert results[0].source_url == "https://register.example/100"
+    assert str(results[0].source_url) == "https://register.example/100"
     assert results[-1].name == "Dr. B"
     assert results[-1].source_url is None
     dataset_calls = [call for call in calls if call.url.path.endswith("/items")]
@@ -277,3 +293,51 @@ def test_lookup_endpoint_reports_upstream_failure(monkeypatch) -> None:
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "lookup_unavailable"
     assert "upstream details" not in response.text
+
+
+def test_lookup_endpoint_reports_timeout(monkeypatch) -> None:
+    async def timed_out(_request):
+        raise NmcApifyTimeoutError("The registration search timed out. Please try again.")
+
+    monkeypatch.setattr(nmc_route, "lookup_doctors", timed_out)
+    response = client.post(
+        "/api/doctors/registration-lookup",
+        json={"name": "Dr."},
+    )
+
+    assert response.status_code == 504
+    assert response.json()["error"]["code"] == "lookup_timeout"
+
+
+def test_duplicate_searches_share_one_actor_execution(monkeypatch) -> None:
+    config = _config()
+    monkeypatch.setattr(
+        ApifyConfig,
+        "from_environment",
+        classmethod(lambda _cls, _request: config),
+    )
+    nmc_lookup._CACHE.clear()
+    nmc_lookup._IN_FLIGHT.clear()
+    calls = 0
+
+    class FakeApifyLookup:
+        def __init__(self, _config):
+            pass
+
+        async def lookup(self, _search):
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0)
+            return []
+
+    monkeypatch.setattr(nmc_lookup, "ApifyNmcLookup", FakeApifyLookup)
+
+    async def perform_duplicate_lookups():
+        search = NmcSearchRequest(name="Dr. Same")
+        return await asyncio.gather(
+            nmc_lookup.lookup_doctors(search),
+            nmc_lookup.lookup_doctors(search),
+        )
+
+    assert asyncio.run(perform_duplicate_lookups()) == [[], []]
+    assert calls == 1

@@ -14,7 +14,7 @@ from app.services.nmc_lookup import (
 router = APIRouter()
 
 
-@router.post("/api/doctors/registration-lookup")
+@router.post("/api/doctors/registration-lookup", response_model=None)
 async def lookup_registration(
     request: NmcSearchRequest,
 ) -> NmcLookupResponse | JSONResponse:

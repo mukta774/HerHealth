@@ -15,6 +15,7 @@ from app.models.nmc import NmcDoctorResult, NmcSearchRequest
 APIFY_API_BASE_URL = "https://api.apify.com/v2"
 _CACHE_TTL_SECONDS = 60
 _CACHE: dict[str, tuple[float, list[NmcDoctorResult]]] = {}
+_IN_FLIGHT: dict[str, asyncio.Task[list[NmcDoctorResult]]] = {}
 
 
 class NmcLookupError(Exception):
@@ -265,7 +266,15 @@ class ApifyNmcLookup:
 async def lookup_doctors(search: NmcSearchRequest) -> list[NmcDoctorResult]:
     config = ApifyConfig.from_environment(search)
     cache_key = hashlib.sha256(
-        json.dumps(search.model_dump(), sort_keys=True).encode()
+        json.dumps(
+            {
+                "search": search.model_dump(),
+                "actor_id": config.actor_id,
+                "input_fields": config.input_fields,
+                "output_fields": config.output_fields,
+            },
+            sort_keys=True,
+        ).encode()
     ).hexdigest()
     cached = _CACHE.get(cache_key)
     if cached and cached[0] > time.monotonic():
@@ -273,6 +282,21 @@ async def lookup_doctors(search: NmcSearchRequest) -> list[NmcDoctorResult]:
     if cached:
         _CACHE.pop(cache_key, None)
 
+    task = _IN_FLIGHT.get(cache_key)
+    if task is None:
+        task = asyncio.create_task(_lookup_and_cache(cache_key, config, search))
+        _IN_FLIGHT[cache_key] = task
+        task.add_done_callback(
+            lambda completed: _IN_FLIGHT.pop(cache_key, None)
+            if _IN_FLIGHT.get(cache_key) is completed
+            else None
+        )
+    return await asyncio.shield(task)
+
+
+async def _lookup_and_cache(
+    cache_key: str, config: ApifyConfig, search: NmcSearchRequest
+) -> list[NmcDoctorResult]:
     service = ApifyNmcLookup(config)
     results = await service.lookup(search)
     _CACHE[cache_key] = (time.monotonic() + _CACHE_TTL_SECONDS, results)
